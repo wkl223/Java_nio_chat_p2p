@@ -25,23 +25,16 @@ public class ServerReception {
         Protocol respond = ServerResponds.message(content,client);
         return respond;
     }
-    public static Protocol deleteRoom(Protocol p,  String client,Map<String,String> clients, List<Room> chatRoom) throws IOException{
+    public static Protocol deleteRoom(Protocol p, List<Room> chatRoom) throws IOException{
         String requestedRoomId = p.getMessage().getRoomid();
         Protocol respond = null;
         Room targetRoom =ServerResponds.findRoom(chatRoom,requestedRoomId);
         if(targetRoom!= null && !targetRoom.getRoomid().equals(DEFAULT_ROOM)) {
-            if(targetRoom.getOwner().equals(client)) {
-                // 1. put everyone into main hall.
-                for (String user : targetRoom.users) {
-                    clients.remove(user);
-                    clients.put(user, DEFAULT_ROOM);
-                }
-                // 2. remove room object.
-                chatRoom.remove(targetRoom);
-                respond = ServerResponds.roomList(chatRoom);
-                respond.getMessage().setSuccessed(true);
-                return respond;
-            }
+            // remove room object.
+            chatRoom.remove(targetRoom);
+            respond = ServerResponds.roomList(chatRoom);
+            respond.getMessage().setSuccessed(true);
+            return respond;
         }
         respond = ServerResponds.roomList(chatRoom);
         respond.getMessage().setSuccessed(false);
@@ -92,25 +85,5 @@ public class ServerReception {
         }
         return respond;
     }
-    public static Protocol identityChange(Protocol p, String client, Map<String,String>clients,List<String> freeName,List<Room>chatRoom) throws IOException {
-        String former = client;
-        String newIdentity = p.getMessage().getIdentity();
-        Protocol respond = ServerResponds.newIdentity(clients,freeName,former,newIdentity);
-        if (respond.getMessage().isSuccessed()){
-            //1. rename client
-            String room = clients.get(former);
-            clients.remove(former);
-            clients.put(newIdentity,room);
-            //2. modify room entity that's holding user list.
-            for (Room r: chatRoom){
-                if(r.owner.equals(former)) r.owner = newIdentity;
-                if(r.users.contains(former)){
-                    r.removeUser(former);
-                    r.addUser(newIdentity);
-                }
-            }
-        }
-        return respond;
 
-    }
 }

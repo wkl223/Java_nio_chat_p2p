@@ -48,7 +48,12 @@ public class Message<T> {
     public static final String TYPE_ROOM_CREATION = "createroom";
     public static final String TYPE_DELETE = "delete";
     public static final String TYPE_LIST = "list";
+    public static final String TYPE_HOST_CHANGE = "hostchange";
     public static final String TYPE_ROOM_CHANGE ="roomchange";
+    public static final String TYPE_LIST_NEIGHBORS = "listneighbors";
+    public static final String TYPE_NEIGHBORS = "neighbors";
+    public static final String TYPE_CONNECT = "connect";
+
     // delimiters and marks
     public static final String KV_DELIMITER = ":";
     public static final String TUPLE_DELIMITER =",";

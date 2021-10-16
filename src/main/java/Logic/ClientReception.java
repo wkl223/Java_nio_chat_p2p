@@ -14,26 +14,18 @@ public class ClientReception {
         }
         return null;
     }
-    public static String newIdentity(Protocol p, String client) throws IOException {
-        String former = p.getMessage().getFormer();
-        String identity =p.getMessage().getIdentity();
-//        System.out.println("DEBUG - newIdentity Reception former:"+former+", identity:"+identity+", client:"+client);
-        if(former.equals(identity) && former.equals(client))
-            return "Requested identity invalid or inuse";
-        else if(former.equals("")) return "Welcome! "+identity;
-        else return former+" is now "+identity;
-    }
+
     public static String roomChange(Protocol p, String clientName, Map<String,String> request) throws IOException {
         String formerRoom = p.getMessage().getFormer();
         String roomid = p.getMessage().getRoomid();
         String identity = p.getMessage().getIdentity();
-        if(formerRoom.equals(roomid)) return "The requested room is invalid or non existent.";
+        if(formerRoom.equals(roomid) && !roomid.equals("")) return "The requested room is invalid or non existent.";
         if (roomid.equals(Message.EMPTY) && clientName.equals(identity) && request.containsKey(Message.TYPE_QUIT)) return Message.OK;
         if (roomid.equals(Message.EMPTY)) return identity+" has left";
         if (formerRoom.equals(Message.EMPTY)) return identity+" moves to "+roomid;
         return identity+" moved from "+formerRoom+" to "+roomid;
     }
-    public static String roomContents(Protocol p) throws IOException{
+    public static String roomContents(Protocol p) {
         String roomId = p.getMessage().getRoomid();
         List<String> identities = p.getMessage().getParticipants();
         String owner = p.getMessage().getOwner();
@@ -69,6 +61,9 @@ public class ClientReception {
         }
         for(Room r: rooms){
             response += Message.addHeadAndTail(r.getRoomid()+", Number of people in the room:"+r.getCount(),"[","]");
+        }
+        if(rooms == null){
+            response = "No room is available.";
         }
         return response;
     }

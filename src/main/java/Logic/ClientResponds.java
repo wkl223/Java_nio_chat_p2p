@@ -25,7 +25,8 @@ public class ClientResponds {
         }
         return null;
     }
-    public static String processMessage(String message, Map<String,String> requests) throws IOException {
+
+    public static String processMessage(String message, Map<String,String> requests, boolean isConnected) throws IOException {
         String command =getCommand(message);
         if(command!=null){
             StringTokenizer tokenizer = new StringTokenizer(message," ");
@@ -37,59 +38,62 @@ public class ClientResponds {
             }catch(Exception e){
                 //don't do anything
                 }
-            switch(command){
-                case Message.TYPE_IDENTITY_CHANGE:
-                    answer =identityChange(request);
-                    if(answer==null) return "Requested identity invalid or inuse";
-                    return answer.encodeJson();
-                case Message.TYPE_JOIN: {
-                    if(request !=null)
-                        return joinRoom(request).encodeJson();
-                    return INVALID;
-                }
-                case Message.TYPE_WHO: {
-                    if(request !=null)
-                        return who(request).encodeJson();
-                    return INVALID;
-                }
-                case Message.TYPE_LIST:
-                    return list().encodeJson();
-                case Message.TYPE_ROOM_CREATION: {
-                    answer = createRoom(request);
-                    if (answer == null) return "Invalid room name";
-                    else if(request!=null){
-                        requests.put(Message.TYPE_ROOM_CREATION,request);
+            // local commands, will regulate the message into Message.TYPE
+            // the actual logic is executed in client main.
+            if(!isConnected){
+                switch(command){
+                    case Message.TYPE_ROOM_CREATION: {
+                        answer = createRoom(request);
+                        if (answer == null) return "Invalid room name";
+                        else if(request!=null){
+                            requests.put(Message.TYPE_ROOM_CREATION,request);
+                        }
+                        return createRoom(request).encodeJson();
                     }
-                    return createRoom(request).encodeJson();
-                }
-                case Message.TYPE_DELETE: {
-                    if(request!=null)
-                        requests.put(Message.TYPE_DELETE,request);
-                    return deleteRoom(request).encodeJson();
-                }
-                case Message.TYPE_QUIT: {
-                    requests.put(Message.TYPE_QUIT,Message.EMPTY);
-                    return quit().encodeJson();
-                }
-                default: {
-//                    System.out.println("DEBUG - SOMETHING WRONG WITH THE PROCESS MESSAGE FUNCTION?");
-                    return INVALID;
+                    case Message.TYPE_DELETE: {
+                        if(request!=null)
+                            requests.put(Message.TYPE_DELETE,request);
+                        return deleteRoom(request).encodeJson();
+                    }
+                    case Message.TYPE_QUIT: {
+                        return quit().encodeJson();
+                    }
+                    case Message.TYPE_CONNECT:{
+                        return connect(request).encodeJson();
+                    }
+                    default:
+                        return INVALID;
                 }
             }
+            else{
+                switch(command){
+                    case Message.TYPE_JOIN: {
+                        if(request !=null)
+                            return joinRoom(request).encodeJson();
+                        return INVALID;
+                    }
+                    case Message.TYPE_WHO: {
+                        if(request !=null)
+                            return who(request).encodeJson();
+                        return INVALID;
+                    }
+                    case Message.TYPE_LIST:
+                        return list().encodeJson();
+                    case Message.TYPE_QUIT: {
+                        requests.put(Message.TYPE_QUIT, Message.EMPTY);
+                        return quit().encodeJson();
+                    }
+                    default: {
+//                    System.out.println("DEBUG - SOMETHING WRONG WITH THE PROCESS MESSAGE FUNCTION?");
+                        return INVALID;
+                    }
+                }
+            }
+
         }
         return message(message).encodeJson();
     }
-    public static Protocol identityChange(String request){
-        if(request.length()<3 || request.length() >16)
-            return null;
-        else if (String.valueOf(request.charAt(0)).matches(ALPHABETIC_PATTERN)&&request.matches(ALPHANUMERIC_PATTERN)){
-            Message m = new Message();
-            m.setType(Message.TYPE_IDENTITY_CHANGE);
-            m.setIdentity(request);
-            return new Protocol(m);
-        }
-        return null;
-    }
+
     public static Protocol joinRoom(String request){
         Message m = new Message();
         m.setType(Message.TYPE_JOIN);
@@ -136,7 +140,13 @@ public class ClientResponds {
         return new Protocol(m);
     }
 
-
+    // customized protocol message, only used in local for consistency.
+    public static Protocol connect(String request){
+        Message m = new Message();
+        m.setType(Message.TYPE_CONNECT);
+        m.setContent(request);
+        return new Protocol(m);
+    }
 
 
 }
