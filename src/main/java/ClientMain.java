@@ -1,24 +1,25 @@
-import Logic.ClientReception;
-import Logic.ClientResponds;
-import Logic.ParameterHandler;
-import Logic.ServerReception;
+import Logic.*;
+import Protocol.Entity.Room;
 import Protocol.Message;
 import Protocol.Protocol;
 
+import javax.security.auth.callback.Callback;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
-import java.nio.channels.ClosedChannelException;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
-import java.nio.channels.SocketChannel;
+import java.nio.channels.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import static Logic.ServerReception.DEFAULT_ROOM;
 
 
 public class ClientMain {
@@ -40,8 +41,8 @@ public class ClientMain {
 
     public static void handle(String hostAddr, int destinationPort) {
         try {
-            boolean temp = future.cancel(true);
-            System.out.println("local user input handler stopped stat: "+temp);
+            future.cancel(true);
+            System.out.println("keyboard interrupt sent in handle()");
             socketChannel = SocketChannel.open();
             socketChannel.configureBlocking(false);// set to unblocking mode
             selector = Selector.open();
@@ -65,24 +66,34 @@ public class ClientMain {
                 selectionKeys.clear();
             }
         } catch (ClosedChannelException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
+            quit();
+            System.out.println("Forced quit by ctrl+D, quit");
+        }catch (ClosedSelectorException e) {
+            quit();
+            System.out.println("Forced quit by ctrl+D, quit");
+        }
+        catch (IOException e) {
             e.printStackTrace();
         }finally {
-            quit();
             localConsole();
+            completed = true;
         }
     }
     static void localConsole(){
         init();
         System.out.println("DEBUG - local console start");
         System.out.print(prefix);
-        USER_INPUT_HANDLER = Executors.newSingleThreadExecutor();
         future = USER_INPUT_HANDLER.submit(() -> {
             System.out.println("DEBUG - local user input handler is up");
+            completed = false;
             while (!Thread.currentThread().isInterrupted()) {
                 try {
-                    String message = new Scanner(System.in).nextLine();
+                    BufferedReader br = new BufferedReader(
+                            new InputStreamReader(System.in));
+                    String message;
+                    while (!Thread.currentThread().isInterrupted()&&!br.ready()) {
+                    }
+                    message = br.readLine();
                     String m = ClientResponds.processMessage(message,request,false);
                     System.out.println("DEBUG - client local command:" +m);
                     if(!m.equals(ClientResponds.INVALID)){
@@ -97,9 +108,61 @@ public class ClientMain {
                                 return;
                             }
                             case Message.TYPE_DELETE: {
-                                Protocol respond = ServerReception.deleteRoom(msg, SERVER.chatRoom);
+                                List<String> affectedClients = null;
+
+                                Room affectedRoom =ServerResponds.findRoom(SERVER.chatRoom,msg.getMessage().getRoomid());
+                                Protocol respond = ServerReception.deleteRoom(msg,SERVER.clients,SERVER.chatRoom);
                                 System.out.println("DEBUG - local server logic respond:" +respond.encodeJson());
-                                if(respond.getMessage().isSuccessed()) System.out.println("Room "+msg.getMessage().getRoomid()+" has been deleted");
+                                if(affectedRoom != null) {
+                                    affectedClients = affectedRoom.getUsers();
+                                }
+                                if(respond.getMessage().isSuccessed()){
+                                    for(String c: affectedClients){
+                                        Protocol temp = ServerResponds.roomChange(SERVER.chatRoom,c,affectedRoom.getRoomid(),DEFAULT_ROOM);
+
+                                        // broadcast message without client sender (thus an empty selection key)
+                                        SERVER.broadCast(temp, (ArrayList<String>) SERVER.defaultRoom.users, SERVER.selector, new SelectionKey() {
+                                            @Override
+                                            public SelectableChannel channel() {
+                                                return null;
+                                            }
+
+                                            @Override
+                                            public Selector selector() {
+                                                return null;
+                                            }
+
+                                            @Override
+                                            public boolean isValid() {
+                                                return false;
+                                            }
+
+                                            @Override
+                                            public void cancel() {
+
+                                            }
+
+                                            @Override
+                                            public int interestOps() {
+                                                return 0;
+                                            }
+
+                                            @Override
+                                            public SelectionKey interestOps(int ops) {
+                                                return null;
+                                            }
+
+                                            @Override
+                                            public int readyOps() {
+                                                return 0;
+                                            }
+                                        });
+                                        SERVER.defaultRoom.users.add(c);
+                                        SERVER.clients.remove(c);
+                                        SERVER.clients.put(c,DEFAULT_ROOM);
+                                    }
+                                    System.out.println("Room "+msg.getMessage().getRoomid()+" has been deleted");
+                                }
                                 else System.out.println("Room "+msg.getMessage().getRoomid()+" deletion failed");
                                 break;
                             }
@@ -108,6 +171,14 @@ public class ClientMain {
                                 System.out.println("DEBUG - local server logic respond:" +respond.encodeJson());
                                 if(respond.getMessage().isSuccessed()) System.out.println("Room "+msg.getMessage().getRoomid()+" has been created");
                                 else System.out.println("Room "+msg.getMessage().getRoomid()+" creation failed");
+                                break;
+                            }
+                            case Message.TYPE_KICK:{
+                                System.out.println(m);
+                                Protocol respond = ServerReception.kick(msg.getMessage().getContent(),SERVER.chatRoom,SERVER.clients,SERVER.client_addresses,SERVER.blackList, SERVER.selector);
+                                System.out.println("DEBUG - local server logic respond:" +respond.encodeJson());
+                                if(respond.getMessage().isSuccessed()) System.out.println("DEBUG - user kicked");
+                                else System.out.println("User not been kicked");
                                 break;
                             }
                             case Message.TYPE_QUIT:
@@ -121,8 +192,11 @@ public class ClientMain {
                 } catch(NullPointerException e){
                     System.out.println("NullPointer: Invalid input");
                     e.printStackTrace();
-                } catch(Exception e){ //System.out.println("Strange error?");
+                } catch(Exception e){
+                    // handle any errors here, plus ctrl+D.
+                    System.out.println("Exception caught, quit");
                     e.printStackTrace();
+                    localQuit();
                 }
             }
         });
@@ -139,37 +213,53 @@ public class ClientMain {
                     socketChannel.register(selector, SelectionKey.OP_READ);
                     ByteBuffer byteBuffer = ByteBuffer.allocate(1024);//1024 bytes
                     USER_INPUT_HANDLER = Executors.newSingleThreadExecutor();
+                    // send hostchange packet
+                    byteBuffer.put(ClientResponds.hostchange(InetAddress.getLocalHost().getHostAddress()+":"+ listeningPort).encodeJson().getBytes(StandardCharsets.UTF_8));
+                    byteBuffer.flip();
+                    while (byteBuffer.hasRemaining()) {
+                        socketChannel.write(byteBuffer);
+                    }
                     future = USER_INPUT_HANDLER.submit(() -> {
                         System.out.println("handler start in selection key statement");
                         while (!Thread.currentThread().isInterrupted()) {
                             byteBuffer.clear();
                             try {
-                                System.out.println("in try statement");
-                                String message = new Scanner(System.in).nextLine();
-                                String m =ClientResponds.processMessage(message,request,true);
-                                if(m.equals(ClientResponds.INVALID)) {
-                                    m = null; //don't do anything
-                                    System.out.println("invalid parameter");
-                                }
-//                                System.out.println("DEBUG - client side: "+m);
-                                if(m!=null) {
-                                    byteBuffer.put(new Protocol(m).encodeJson().getBytes(StandardCharsets.UTF_8));
-                                    byteBuffer.flip();
-                                    while (byteBuffer.hasRemaining()) {
-                                        socketChannel.write(byteBuffer);
+                                    BufferedReader br = new BufferedReader(
+                                            new InputStreamReader(System.in));
+                                    String message;
+                                    while (!Thread.currentThread().isInterrupted()&&!br.ready()) {
                                     }
+                                    if(!completed) {
+                                    message = br.readLine();
+                                    String m = ClientResponds.processMessage(message, request, true);
+                                    if (m.equals(ClientResponds.INVALID)) {
+                                        m = null; //don't do anything
+                                        System.out.println("invalid parameter");
+                                    }
+                                    System.out.println("DEBUG - client side: " + m);
+                                    if(new Protocol(m).getType().equals(Message.TYPE_QUIT)){
+                                        completed = true;
+                                    }
+                                    if (m != null) {
+                                        byteBuffer.put(new Protocol(m).encodeJson().getBytes(StandardCharsets.UTF_8));
+                                        byteBuffer.flip();
+                                        while (byteBuffer.hasRemaining()) {
+                                            socketChannel.write(byteBuffer);
+                                        }
+                                    }
+                                    System.out.print(prefix);//new prompt.
                                 }
-                                System.out.print(prefix);//new prompt.
                             } catch (IOException e) {
-                               //System.out.println("Invalid input");
+                               System.out.println("IO: Invalid input");
                             } catch(NullPointerException e){
-                                //System.out.println("Invalid input");
+                                System.out.println("Null: Invalid input");
                             }
                             catch (NoSuchElementException e){
-                                System.out.println("Something wrong with the server side (cannot decode message), program terminate");
-                                System.exit(-1);
+                                System.out.println("Something wrong with the server side (cannot decode message) OR ctrl+D entered? connection abort");
+                                quit();
                             }
-                            catch(Exception e){ //System.out.println("Strange error?");
+                            catch(Exception e){
+                                System.out.println("Strange error?");
                             }
                         }
                     });
@@ -179,6 +269,7 @@ public class ClientMain {
                 System.err.println("ERROR - Cannot connect to server!!");
                 quit();
                 localConsole();
+                completed = true;
             }
         } else if (selectionKey.isReadable()) {
             SocketChannel socketChannel = (SocketChannel) selectionKey.channel();
@@ -197,14 +288,17 @@ public class ClientMain {
 //                    System.out.print("\n"+serverRespond);
                     if(serverRespond.equals(Message.OK)&&request.containsKey(Message.TYPE_QUIT)){
                         quit();
-                        return;
+                        completed = true;
+                        continue;
                     }
 //                    System.out.print("\n"+serverRespond);
                 }
                 System.out.print("\n"+prefix);// follow-up prefix as command prompt
-            } catch (IOException e) {
+            } catch (Exception e) {
                 System.out.println("Error - Something wrong in server message, connection abort!");
+                completed = true;
                 quit();
+                localConsole();
             }
         }
     }
@@ -212,19 +306,18 @@ public class ClientMain {
         userName = "";
         currentRoom = "";
         prefix = ">";
-        completed = false;
     }
     public static void main(String[] args) throws IOException {
         ParameterHandler p = new ParameterHandler();
         p.doMain(args);
-        int listeningPort=0,outgoingPort=0;
-        if( p.getP()>=0 ) {
-            listeningPort = p.getP();
+        USER_INPUT_HANDLER = Executors.newSingleThreadExecutor();
+        if( p.getP()>0 ) {
+            ClientMain.listeningPort = p.getP();
         }
         if( p.getI()>0 ) {
-            outgoingPort = p.getI();
+            ClientMain.outgoingPort = p.getI();
         }
-        System.out.println("DEBUG - set listening address at "+ InetAddress.getLocalHost()+":"+ listeningPort+", set outgoing port:"+outgoingPort);
+        System.out.println("DEBUG - set listening address at "+ InetAddress.getLocalHost().getHostAddress()+":"+ ClientMain.listeningPort+", set outgoing port:"+ClientMain.outgoingPort);
         int finalListeningPort = listeningPort;
         new Thread(() -> {
             try {
@@ -237,9 +330,10 @@ public class ClientMain {
         localConsole();
     }
 
-    public static String processMessageAndRepresent(String message, String name) throws IOException {
+    public static String processMessageAndRepresent(String message, String name)  {
         Protocol p = new Protocol(message);
         String client = name;
+        try{
         switch (p.decodeJson().getType()){
             case Message.TYPE_ROOM_CHANGE: {
                 String formerRoom = p.getMessage().getFormer();
@@ -263,9 +357,16 @@ public class ClientMain {
                 System.out.println("DEBUG: Server sends a message with incorrect type! Type:"+p.decodeJson().getType());
                 return null;
         }
+        }
+        catch(Exception e){
+            System.out.println("DEBUG - received something wrong. Disconnected");
+            quit();
+        }
+        return null;
     }
     private static void quit(){
         try {
+            System.out.println("DEBUG - quit() called");
             selector.close();
             socketChannel.close();
             future.cancel(true);

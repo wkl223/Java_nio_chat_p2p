@@ -4,6 +4,8 @@ import Protocol.Entity.Room;
 import Protocol.*;
 
 import java.io.IOException;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -14,7 +16,7 @@ import java.util.Map;
  *  Construct Json message (Protocol) from Message object
  * */
 public class ServerReception {
-    public static final String DEFAULT_ROOM = "MainHall";
+    public static final String DEFAULT_ROOM = "";
 
     public static Protocol quit(Protocol p, String client, List<Room> chatRoom, Map<String,String> clients) throws IOException {
         Protocol respond = ServerResponds.roomChange(chatRoom,client, clients.get(client), Message.EMPTY);
@@ -25,11 +27,16 @@ public class ServerReception {
         Protocol respond = ServerResponds.message(content,client);
         return respond;
     }
-    public static Protocol deleteRoom(Protocol p, List<Room> chatRoom) throws IOException{
+    public static Protocol deleteRoom(Protocol p,Map<String,String> clients ,List<Room> chatRoom) throws IOException{
         String requestedRoomId = p.getMessage().getRoomid();
         Protocol respond = null;
         Room targetRoom =ServerResponds.findRoom(chatRoom,requestedRoomId);
         if(targetRoom!= null && !targetRoom.getRoomid().equals(DEFAULT_ROOM)) {
+            // 1. put everyone into main hall.
+            for (String user : targetRoom.users) {
+                clients.remove(user);
+                clients.put(user, DEFAULT_ROOM);
+            }
             // remove room object.
             chatRoom.remove(targetRoom);
             respond = ServerResponds.roomList(chatRoom);
@@ -86,4 +93,43 @@ public class ServerReception {
         return respond;
     }
 
+    public static Protocol kick(String userName, List<Room> chatRoom, Map<String,String>clients, Map<String,String> clients_addr, List<String> blackList, Selector selector) throws IOException {
+        // simply remove the user in all, and add to blacklist
+        String targetIp = userName.split(":")[0];
+        System.out.println("Kicking from room");
+        for (Room r:chatRoom){
+            r.removeUser(targetIp);
+        }
+        System.out.println("Kicking from client list");
+        for (var entry: clients.entrySet()){
+            if(entry.getKey().contains(targetIp)){
+                clients.remove(entry.getKey());
+            }
+        }
+        System.out.println("Kicking from client addresses list");
+        for (var entry: clients_addr.entrySet()){
+            if(entry.getKey().contains(targetIp)){
+                clients_addr.remove(entry.getKey());
+            }
+        }
+        System.out.println("Deregister the keys");
+        for(SelectionKey k: selector.keys()){
+            String clientIp = (String)k.attachment();
+            // The selection key of server itself has no attachment.
+            if(clientIp!= null) {
+                if (clientIp.contains(targetIp)) {
+                    k.cancel();
+                    k.channel().close();
+                    selector.wakeup();
+                    System.out.println("DEBUG - kicked client: " + clientIp);
+                }
+            }
+        }
+        blackList.add(targetIp);
+        Message m = new Message();
+        m.setType(Message.TYPE_KICK);
+        m.setSuccessed(true);
+        System.out.println("DEBUG - delete user and block ip:"+targetIp);
+        return new Protocol(m);
+    }
 }

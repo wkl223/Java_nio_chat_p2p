@@ -22,19 +22,14 @@ public class Message<T> {
     private String former;
     private String owner;
     private String roomid;
+    private String host;
     private List<Room> rooms;
     private List<String> identities;
+
     @JsonIgnore
     private boolean isSuccessed;
 
     // message head constant
-    public static final String MESSAGE_HEAD = "content";
-    public static final String TYPE_HEAD = "type";
-    public static final String ROOM_HEAD ="room";
-    public static final String ROOM_DESTINATION_HEAD ="roomid";
-    public static final String ROOM_LIST_HEAD ="rooms";
-    public static final String FORMER_HEAD ="former";
-    public static final String IDENTITY_HEAD ="identity";
     public static final String EMPTY = "";
     // type constant
     public static final String TYPE_MESSAGE = "message";
@@ -53,10 +48,9 @@ public class Message<T> {
     public static final String TYPE_LIST_NEIGHBORS = "listneighbors";
     public static final String TYPE_NEIGHBORS = "neighbors";
     public static final String TYPE_CONNECT = "connect";
+    public static final String TYPE_KICK = "kick";
 
     // delimiters and marks
-    public static final String KV_DELIMITER = ":";
-    public static final String TUPLE_DELIMITER =",";
     public static final String ROOM_OWNER_MARK ="*";
     public static final String OK = "OK";
     public String getContent(){
@@ -72,7 +66,9 @@ public class Message<T> {
     public String getRoomid(){return this.roomid;}
     public List<Room> getRooms(){return this.rooms;}
     public List<String> getParticipants(){return this.identities;}
+    public String getHost() {return host;}
 
+    public void setHost(String host) {this.host = host;}
     public void setType(String type) {this.type = type;}
     public void setContent(String content) {this.content = content;}
     public void setIdentity(String identity) {this.identity = identity;}
@@ -90,37 +86,6 @@ public class Message<T> {
         out = head+out+tail;
         return out;
     }
-    public static String transformMessagePairs(String head, String content){
-        String message = addHeadAndTail(head,"\"","\"")+KV_DELIMITER+addHeadAndTail(content,"\"","\"");
-        return message;
-    }
-    public static String transformListPairs(String head, String content){
-        String message = addHeadAndTail(head,"\"","\"")+KV_DELIMITER+content;
-        return message;
-    }
-
-    public static String jsonCompose(List<String> content){
-        String out="";
-        for(String s :content){
-            out += s+TUPLE_DELIMITER;
-        }
-        out = out.substring(0,out.length()-1);//ignore the last comma
-        return addHeadAndTail(out,"{","}");
-    }
-    public static String jsonCompose(Message m) throws IOException {
-        final ObjectMapper mapper = new ObjectMapper();
-        final ByteArrayOutputStream out = new ByteArrayOutputStream();
-        mapper.writeValue(out,m);
-        return new String(out.toByteArray());
-    }
-    public static String roomListToJson(List<Room> rooms) throws IOException {
-        final ByteArrayOutputStream out = new ByteArrayOutputStream();
-        final ObjectMapper mapper = new ObjectMapper();
-        mapper.writeValue(out, rooms);
-        final byte[] data =out.toByteArray();
-        return new String(data);
-    }
-
     public boolean isSuccessed() {
         return isSuccessed;
     }
@@ -128,6 +93,7 @@ public class Message<T> {
     public void setSuccessed(boolean successed) {
         isSuccessed = successed;
     }
+
 
 }
 

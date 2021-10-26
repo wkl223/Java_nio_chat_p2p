@@ -15,6 +15,7 @@ public class ClientResponds {
     private static final String NUMERIC_PATTERN="[0-9]+";
     private static final String ALPHANUMERIC_PATTERN="[A-Za-z0-9]+";
     public static final String INVALID ="INVALID";
+
     //since it is human typing command, so extra command checking function is required.
     public static String getCommand(String message){
         StringTokenizer tokenizer = new StringTokenizer(message," ");
@@ -61,6 +62,12 @@ public class ClientResponds {
                     case Message.TYPE_CONNECT:{
                         return connect(request).encodeJson();
                     }
+                    case Message.TYPE_HOST_CHANGE:{
+                        return hostchange(request).encodeJson();
+                    }
+                    case Message.TYPE_KICK:{
+                        return kick(request).encodeJson();
+                    }
                     default:
                         return INVALID;
                 }
@@ -83,8 +90,11 @@ public class ClientResponds {
                         requests.put(Message.TYPE_QUIT, Message.EMPTY);
                         return quit().encodeJson();
                     }
+                    case Message.TYPE_HOST_CHANGE:{
+                        hostchange(request).encodeJson();
+                    }
                     default: {
-//                    System.out.println("DEBUG - SOMETHING WRONG WITH THE PROCESS MESSAGE FUNCTION?");
+                    System.out.println("DEBUG - SOMETHING WRONG WITH THE PROCESS MESSAGE FUNCTION?");
                         return INVALID;
                     }
                 }
@@ -92,6 +102,14 @@ public class ClientResponds {
 
         }
         return message(message).encodeJson();
+    }
+
+    private static Protocol kick(String request) {
+        // respond to the local client only.
+        Message m = new Message();
+        m.setType(Message.TYPE_KICK);
+        m.setContent(request);
+        return new Protocol(m);
     }
 
     public static Protocol joinRoom(String request){
@@ -148,5 +166,12 @@ public class ClientResponds {
         return new Protocol(m);
     }
 
+    // host change
+    public static Protocol hostchange(String address){
+        Message m = new Message();
+        m.setType(Message.TYPE_HOST_CHANGE);
+        m.setHost(address);
+        return new Protocol(m);
+    }
 
 }

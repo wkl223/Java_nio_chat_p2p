@@ -17,18 +17,25 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Collectors;
 
 public class ServerMain {
   protected ThreadPool pool = new ThreadPool(10);
   protected volatile List<Room> chatRoom;
+  protected volatile List<String> blackList;
   protected static ConcurrentHashMap clients; //<key=clientName, value=current room>
+  protected static ConcurrentHashMap client_addresses; //<key=clientName, value=client_listening_address>
   protected static final String DEFAULT_ROOM = "";
   protected Room defaultRoom = new Room(DEFAULT_ROOM,"0",""); //for record purpose only, will be completely transparent.
+  SelectionKey selectionKey;
+  Selector selector;
 
   public ServerMain(){
     chatRoom = new CopyOnWriteArrayList<>();
     chatRoom.add(defaultRoom);
-    clients = new ConcurrentHashMap<String,SelectionKey>();
+    blackList = new ArrayList<>();
+    clients = new ConcurrentHashMap<String,String>();
+    client_addresses = new ConcurrentHashMap<String,String>();
   }
   private SelectionKey getKey(Selector selector,String clientName){
     Set<SelectionKey> keys = selector.keys();
@@ -40,7 +47,7 @@ public class ServerMain {
     }
     return null;
   }
-  private synchronized void singleResponse(Protocol message, String name, Selector selector) throws IOException {
+  synchronized void singleResponse(Protocol message, String name, Selector selector) throws IOException {
     ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
     byteBuffer.put(message.encodeJson().getBytes(StandardCharsets.UTF_8));
     System.out.println("DEBUG - Single response: "+message.encodeJson());
@@ -55,7 +62,7 @@ public class ServerMain {
     }
     byteBuffer.clear();
   }
-  private synchronized void broadCast(Protocol message, ArrayList<String> multicastList, Selector selector, SelectionKey selectionKey) throws IOException {
+  synchronized void broadCast(Protocol message, ArrayList<String> multicastList, Selector selector, SelectionKey selectionKey) throws IOException {
     ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
     byteBuffer.put(message.encodeJson().getBytes(StandardCharsets.UTF_8));
     byteBuffer.flip();
@@ -92,7 +99,7 @@ public class ServerMain {
       serverSocketChannel.configureBlocking(false);
       serverSocketChannel.bind(servingAddr);
       Selector selector = Selector.open();
-
+      this.selector = selector;
       serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
       System.out.println("server is up at port: "+ servingAddr.getPort());
 
@@ -120,18 +127,29 @@ public class ServerMain {
       if (selectionKey.isAcceptable()) {
         try {
           SocketChannel socketChannel = ((ServerSocketChannel) selectionKey.channel()).accept();
+          String clientIp = ((ServerSocketChannel) selectionKey.channel()).socket().getInetAddress().getHostAddress();
+
           if (socketChannel != null) {
             //set unblocking mode
             socketChannel.configureBlocking(false);
             // register the client to the selector for event monitoring.
             String clientName = socketChannel.getRemoteAddress().toString().replace("/","");
-            System.out.println("DEBUG: client connection established: " + clientName);
+            SelectionKey clientKey = socketChannel.register(selector, SelectionKey.OP_READ, clientName);
+            System.out.println("DEBUG - Received connect from client: "+clientIp);
+            if(blackList.contains(clientIp)) {
+              System.out.println("DEBUG - In blacklist, connection abort");
+              clientKey.cancel();
+              clientKey.channel().close();
+              selector.wakeup();
+              return;
+            }
+            System.out.println("DEBUG - client connection established: " + clientName);
             List<Room> tempRoom = new ArrayList<>(chatRoom);
             tempRoom.remove(defaultRoom);
             Protocol roomList = ServerResponds.roomList(tempRoom);
 //            Protocol roomContent = ServerResponds.roomContents(DEFAULT_ROOM, chatRoom);
 //            Protocol roomChange = ServerResponds.roomChange(chatRoom, clientName, ServerResponds.NEW_USER, DEFAULT_ROOM);
-            SelectionKey clientKey = socketChannel.register(selector, SelectionKey.OP_READ, clientName);
+
             // add to default room, and add client to the clients name collection.
             clients.put(clientName, DEFAULT_ROOM);
             chatRoom.get(0).users.add(clientName);
@@ -343,6 +361,14 @@ public class ServerMain {
             broadCast(answer, (ArrayList<String>) affected.users, selector, selectionKey);
             //Send a copy to the sender according to the slide page 5
             singleResponse(answer, client, selector);
+          }
+          break;
+        }
+        // since host change does not require any s2c packet. Simply check the incoming data and add it to the collection.
+        case Message.TYPE_HOST_CHANGE:{
+          if(p.getMessage().getHost()!=null) {
+            client_addresses.put(client, p.getMessage().getHost());
+            System.out.println("DEBUG - Host added: " + client_addresses.toString());
           }
           break;
         }

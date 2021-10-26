@@ -18,6 +18,7 @@ public class Protocol {
         }
         catch (JsonProcessingException e){
             System.out.println("PROTOCOL ERROR: INVALID INPUT OBJECT");
+//            e.printStackTrace();
         }
         catch (Exception e){
             //just in case
@@ -56,6 +57,7 @@ public class Protocol {
             case Message.TYPE_DELETE:
             case Message.TYPE_QUIT:
             case Message.TYPE_CONNECT:
+            case Message.TYPE_KICK:
                 return true;
             default:
                 return false;
@@ -76,6 +78,8 @@ public class Protocol {
             case Message.TYPE_WHO:
             case Message.TYPE_MESSAGE:
             case Message.TYPE_CONNECT:
+            case Message.TYPE_HOST_CHANGE:
+            case Message.TYPE_KICK:
                 return true;
             default:
                 return false;
@@ -87,6 +91,7 @@ public class Protocol {
             type = m.getType();
         }catch (Exception e){
             //reject anything strange.
+            System.out.println("DEBUG - isValidType() error");
         }
         return isValidType(type);
     }
