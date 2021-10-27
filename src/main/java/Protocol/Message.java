@@ -25,6 +25,7 @@ public class Message<T> {
     private String host;
     private List<Room> rooms;
     private List<String> identities;
+    private List<String> neighbors;
 
     @JsonIgnore
     private boolean isSuccessed;
@@ -49,6 +50,8 @@ public class Message<T> {
     public static final String TYPE_NEIGHBORS = "neighbors";
     public static final String TYPE_CONNECT = "connect";
     public static final String TYPE_KICK = "kick";
+    public static final String TYPE_SEARCH_NETWORK = "searchnetwork";
+    public static final String TYPE_SHOUT = "shout";
 
     // delimiters and marks
     public static final String ROOM_OWNER_MARK ="*";
@@ -95,5 +98,12 @@ public class Message<T> {
     }
 
 
+    public List<String> getNeighbors() {
+        return neighbors;
+    }
+
+    public void setNeighbors(List<String> neighbors) {
+        this.neighbors = neighbors;
+    }
 }
 

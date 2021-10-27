@@ -68,8 +68,13 @@ public class ClientResponds {
                     case Message.TYPE_KICK:{
                         return kick(request).encodeJson();
                     }
-                    default:
+                    case Message.TYPE_SEARCH_NETWORK:{
+                        return searchNetwork().encodeJson();
+                    }
+                    default: {
+                        System.out.println("DEBUG - SOMETHING WRONG WITH THE PROCESS MESSAGE FUNCTION?");
                         return INVALID;
+                    }
                 }
             }
             else{
@@ -93,6 +98,12 @@ public class ClientResponds {
                     case Message.TYPE_HOST_CHANGE:{
                         hostchange(request).encodeJson();
                     }
+                    case Message.TYPE_LIST_NEIGHBORS:{
+                        return listNeighbors().encodeJson();
+                    }
+                    case Message.TYPE_SEARCH_NETWORK:{
+                        return searchNetwork().encodeJson();
+                    }
                     default: {
                     System.out.println("DEBUG - SOMETHING WRONG WITH THE PROCESS MESSAGE FUNCTION?");
                         return INVALID;
@@ -104,7 +115,19 @@ public class ClientResponds {
         return message(message).encodeJson();
     }
 
-    private static Protocol kick(String request) {
+    public static Protocol searchNetwork() {
+        Message m = new Message();
+        m.setType(Message.TYPE_SEARCH_NETWORK);
+        return new Protocol(m);
+    }
+
+    public static Protocol listNeighbors() {
+        Message m = new Message();
+        m.setType(Message.TYPE_LIST_NEIGHBORS);
+        return new Protocol(m);
+    }
+
+    public static Protocol kick(String request) {
         // respond to the local client only.
         Message m = new Message();
         m.setType(Message.TYPE_KICK);

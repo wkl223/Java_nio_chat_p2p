@@ -32,7 +32,7 @@ public class ClientReception {
         String persons = "";
         for(int i=0; i <identities.size();i++){
             if(owner.equals(identities.get(i)))
-                identities.set(i,identities.get(i)+Message.ROOM_OWNER_MARK);
+                identities.set(i,identities.get(i)); // This line was used to add room owner mark
             persons = persons+identities.get(i)+" ";
         }
         return roomId+" contains "+persons;
@@ -73,5 +73,10 @@ public class ClientReception {
         if(identity.equals(client)) return content;
         return Message.addHeadAndTail(identity,"[","]")+": "+content;
     }
-
+    public static String neighbors(Protocol p, Map<String,String> request) throws IOException{
+        // partial message
+        List<String> neighborHosts =p.getMessage().getNeighbors();
+        String response = neighborHosts.toString();
+        return response;
+    }
 }

@@ -58,6 +58,8 @@ public class Protocol {
             case Message.TYPE_QUIT:
             case Message.TYPE_CONNECT:
             case Message.TYPE_KICK:
+            case Message.TYPE_LIST_NEIGHBORS:
+            case Message.TYPE_SEARCH_NETWORK:
                 return true;
             default:
                 return false;
@@ -80,6 +82,9 @@ public class Protocol {
             case Message.TYPE_CONNECT:
             case Message.TYPE_HOST_CHANGE:
             case Message.TYPE_KICK:
+            case Message.TYPE_LIST_NEIGHBORS:
+            case Message.TYPE_NEIGHBORS:
+            case Message.TYPE_SEARCH_NETWORK:
                 return true;
             default:
                 return false;

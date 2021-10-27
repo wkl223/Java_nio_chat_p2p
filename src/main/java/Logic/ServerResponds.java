@@ -5,6 +5,7 @@ import Protocol.Entity.Room;
 import Protocol.*;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -70,6 +71,14 @@ public class ServerResponds {
         m.setSuccessed(true);
         return new Protocol(m);
     }
+
+    public static Protocol neighbors(Map<String, String> clients_addr) {
+        Message m = new Message();
+        m.setType(Message.TYPE_NEIGHBORS);
+        m.setNeighbors(new ArrayList<String>(clients_addr.values()));
+        m.setSuccessed(true);
+        return new Protocol(m);
+    }
     //MESSAGE
     public static Protocol message(String content, String identity){
         Message m = new Message();
@@ -86,4 +95,5 @@ public class ServerResponds {
         }
         return null;
     }
+
 }

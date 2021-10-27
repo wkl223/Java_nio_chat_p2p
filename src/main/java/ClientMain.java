@@ -34,17 +34,66 @@ public class ClientMain {
     private static SocketChannel socketChannel;
     private static Selector selector;
     private static boolean completed;
+    private static List<String> searchList;
+    private static final Map<String,String> results = new HashMap<>();
     private static final Map<String,String> request = new HashMap<>();
+    private static Map<String,String> requestLookup;
     protected static final ServerMain SERVER = new ServerMain();
 
-    public static void handle(String hostAddr, int destinationPort) {
+    static synchronized void manualCommand(String jsonObject, SocketChannel socketChannel) throws IOException {
+        ByteBuffer byteBuffer = ByteBuffer.allocate(1024);//1024 bytes
+        byteBuffer.put(jsonObject.getBytes(StandardCharsets.UTF_8));
+        byteBuffer.flip();
+        while (byteBuffer.hasRemaining()) {
+            try {
+                socketChannel.write(byteBuffer);
+            } catch (IOException e) {
+                break;
+            }
+        }
+        byteBuffer.clear();
+        System.out.println("in manualCommand(), sent: "+jsonObject);
+    }
+    // Lite-client specific for set actions and quit.
+    public static void manualConnect(String hostAddr, int destinationPort) throws IOException {
+        Map<String,String> tempRequest = new HashMap<>();
+        tempRequest.put(Message.TYPE_LIST_NEIGHBORS,null); // we are looking for neighbors and rooms
+        tempRequest.put(Message.TYPE_LIST,null);
+        SocketChannel tempSocketChannel = SocketChannel.open();
+        tempSocketChannel.configureBlocking(false);
+        Selector tempSelector = Selector.open();
+        tempSocketChannel.socket().bind(new InetSocketAddress(InetAddress.getLocalHost(),0));
+        tempSocketChannel.register(tempSelector, SelectionKey.OP_CONNECT); // register channel to selector by connection event
+        tempSocketChannel.connect(new InetSocketAddress(hostAddr, destinationPort));
+        System.out.println("DEBUG - connect to: "+hostAddr+":"+destinationPort);
+        String tempUserName = tempSocketChannel.getLocalAddress().toString().replace("/","").trim();
+        System.out.println("DEBUG - issued username:"+tempUserName);
+        while (!tempRequest.isEmpty()) {
+            int eventCountTriggered = tempSelector.select();
+            if (eventCountTriggered <= 0) {
+                continue;
+            }
+            Set<SelectionKey> selectionKeys = tempSelector.selectedKeys();
+            for (SelectionKey selectionKey : selectionKeys) {
+                selectionKeyHandler(selectionKey, tempSelector,false,tempRequest);
+            }
+            selectionKeys.clear();
+        }
+        System.out.println("DEBUG - End of discovery thread");
+    }
+    public static void handle(String hostAddr, int destinationPort, int outPort) {
         try {
             future.cancel(true);
             System.out.println("keyboard interrupt sent in handle()");
             socketChannel = SocketChannel.open();
             socketChannel.configureBlocking(false);// set to unblocking mode
             selector = Selector.open();
-            socketChannel.socket().bind(new InetSocketAddress(InetAddress.getLocalHost(),outgoingPort));
+            if(outPort!=-1){
+                socketChannel.socket().bind(new InetSocketAddress(InetAddress.getLocalHost(),outPort));
+            }
+            else{
+                socketChannel.socket().bind(new InetSocketAddress(InetAddress.getLocalHost(),outgoingPort));
+            }
 //            System.out.println("DEBUG - bind with: "+InetAddress.getLocalHost()+":"+outgoingPort);
             socketChannel.register(selector, SelectionKey.OP_CONNECT);//register channel to selector by connection event
             socketChannel.connect(new InetSocketAddress(hostAddr, destinationPort));
@@ -59,7 +108,7 @@ public class ClientMain {
                 }
                 Set<SelectionKey> selectionKeys = selector.selectedKeys();
                 for (SelectionKey selectionKey : selectionKeys) {
-                    selectionKeyHandler(selectionKey, selector);
+                    selectionKeyHandler(selectionKey, selector,true,null);
                 }
                 selectionKeys.clear();
             }
@@ -101,7 +150,7 @@ public class ClientMain {
                                 String[] req=localConnect(msg.getMessage().getContent());
                                 if(req == null) System.out.println("invalid ip and/or port");
                                 else{
-                                    handle(req[0], Integer.parseInt(req[1]));
+                                    handle(req[0], Integer.parseInt(req[1]), -1);
                                 }
                                 return;
                             }
@@ -176,7 +225,27 @@ public class ClientMain {
                                 Protocol respond = ServerReception.kick(msg.getMessage().getContent(),SERVER.chatRoom,SERVER.clients,SERVER.client_addresses,SERVER.blackList, SERVER.selector);
                                 System.out.println("DEBUG - local server logic respond:" +respond.encodeJson());
                                 if(respond.getMessage().isSuccessed()) System.out.println("DEBUG - user kicked");
-                                else System.out.println("User not been kicked");
+                                else System.out.println("User not found");
+                                break;
+                            }
+                            case Message.TYPE_SEARCH_NETWORK: {
+                                // searching from local server client book.
+                                new Thread(() -> {
+                                    try {
+                                    searchList = new ArrayList<>(SERVER.client_addresses.values());
+                                    System.out.println("search: "+searchList);
+                                    for(String host: new ArrayList<>(searchList)){
+                                        System.out.println("DEBUG - Searching host: "+host);
+                                        String[] req=localConnect(host);
+                                        if(req == null) System.out.println("invalid ip and/or port");
+                                        else{
+                                                manualConnect(req[0], Integer.parseInt(req[1]));
+                                        }
+                                    }
+                                    } catch (Exception e) {
+                                        e.printStackTrace();
+                                    }
+                                }).start();
                                 break;
                             }
                             case Message.TYPE_QUIT:
@@ -199,16 +268,18 @@ public class ClientMain {
             }
         });
     }
-    private static synchronized void selectionKeyHandler(SelectionKey selectionKey, Selector selector) {
+    private static synchronized void selectionKeyHandler(SelectionKey selectionKey, Selector selector, boolean isUserInputAllowed ,Map<String,String> requests) {
         if (selectionKey.isConnectable()) {
             SocketChannel socketChannel = (SocketChannel) selectionKey.channel();
             try {
                 if (socketChannel.isConnectionPending()) {
                     socketChannel.finishConnect();
-                    System.out.println("Connection successd");
-                    currentPeer = socketChannel.getRemoteAddress().toString();
+                    currentPeer = socketChannel.getRemoteAddress().toString().replace("/","");
+                    System.out.println("Connection success at "+currentPeer);
+                    // outgoing port of remote server not available.
+                    SERVER.client_addresses.put(currentPeer,currentPeer);
                     socketChannel.configureBlocking(false);
-                    socketChannel.register(selector, SelectionKey.OP_READ);
+                    SelectionKey serverKey = socketChannel.register(selector, SelectionKey.OP_READ);
                     ByteBuffer byteBuffer = ByteBuffer.allocate(1024);//1024 bytes
                     USER_INPUT_HANDLER = Executors.newSingleThreadExecutor();
                     // send hostchange packet
@@ -217,53 +288,67 @@ public class ClientMain {
                     while (byteBuffer.hasRemaining()) {
                         socketChannel.write(byteBuffer);
                     }
-                    future = USER_INPUT_HANDLER.submit(() -> {
-                        System.out.println("handler start in selection key statement");
-                        while (!Thread.currentThread().isInterrupted()) {
-                            byteBuffer.clear();
-                            try {
+                    if(isUserInputAllowed) {
+                        future = USER_INPUT_HANDLER.submit(() -> {
+                            System.out.println("handler start in selection key statement");
+                            while (!Thread.currentThread().isInterrupted()) {
+                                byteBuffer.clear();
+                                try {
                                     BufferedReader br = new BufferedReader(
                                             new InputStreamReader(System.in));
                                     String message;
-                                    while (!Thread.currentThread().isInterrupted()&&!br.ready()) {
+                                    while (!Thread.currentThread().isInterrupted() && !br.ready()) {
                                     }
-                                    if(!completed) {
-                                    message = br.readLine();
-                                    String m = ClientResponds.processMessage(message, request, true);
-                                    if (m.equals(ClientResponds.INVALID)) {
-                                        m = null; //don't do anything
-                                        System.out.println("invalid parameter");
-                                    }
-                                    System.out.println("DEBUG - client side: " + m);
-                                    if(new Protocol(m).getType().equals(Message.TYPE_QUIT)){
-                                        completed = true;
-                                    }
-                                    if (m != null) {
-                                        byteBuffer.put(new Protocol(m).encodeJson().getBytes(StandardCharsets.UTF_8));
-                                        byteBuffer.flip();
-                                        while (byteBuffer.hasRemaining()) {
-                                            socketChannel.write(byteBuffer);
+                                    if (!completed) {
+                                        message = br.readLine();
+                                        String m = ClientResponds.processMessage(message, request, true);
+                                        if (m.equals(ClientResponds.INVALID)) {
+                                            m = null; //don't do anything
+                                            System.out.println("invalid parameter");
                                         }
+                                        System.out.println("DEBUG - client side: " + m);
+                                        if (new Protocol(m).getType().equals(Message.TYPE_QUIT)) {
+                                            completed = true;
+                                        }
+                                        if (m != null) {
+                                            byteBuffer.put(new Protocol(m).encodeJson().getBytes(StandardCharsets.UTF_8));
+                                            byteBuffer.flip();
+                                            while (byteBuffer.hasRemaining()) {
+                                                socketChannel.write(byteBuffer);
+                                            }
+                                        }
+                                        System.out.print(prefix);//new prompt.
                                     }
-                                    System.out.print(prefix);//new prompt.
+                                } catch (IOException e) {
+                                    System.out.println("IO: Invalid input");
+                                } catch (NullPointerException e) {
+                                    System.out.println("Null: Invalid input");
+                                } catch (NoSuchElementException e) {
+                                    System.out.println("Something wrong with the server side (cannot decode message) OR ctrl+D entered? connection abort");
+                                    quit();
+                                } catch (Exception e) {
+                                    System.out.println("Strange error?");
                                 }
-                            } catch (IOException e) {
-                               System.out.println("IO: Invalid input");
-                            } catch(NullPointerException e){
-                                System.out.println("Null: Invalid input");
                             }
-                            catch (NoSuchElementException e){
-                                System.out.println("Something wrong with the server side (cannot decode message) OR ctrl+D entered? connection abort");
-                                quit();
-                            }
-                            catch(Exception e){
-                                System.out.println("Strange error?");
-                            }
-                        }
-                    });
-
+                        });
+                    }
+                    else{
+                        byteBuffer.clear();
+                        // 1. host change
+                        String hostChangeMessage=ClientResponds.hostchange(InetAddress.getLocalHost().getHostAddress()+":"+ listeningPort).encodeJson();
+                        manualCommand(hostChangeMessage, (SocketChannel) serverKey.channel());
+                        Thread.sleep(100); //short delay for avoid missing packet.
+                        // 2. list neighbors
+                        String listNeighborsMessage=ClientResponds.listNeighbors().encodeJson();
+                        manualCommand(listNeighborsMessage,(SocketChannel) serverKey.channel());
+                        Thread.sleep(100); //short delay for avoid missing packet.
+                        // 3. room lists
+                        String roomList = ClientResponds.list().encodeJson();
+                        manualCommand(roomList,(SocketChannel) serverKey.channel());
+                        Thread.sleep(100); //short delay for avoid missing packet.
+                    }
                 }
-            } catch (IOException e) {
+            } catch (IOException | InterruptedException e) {
                 System.err.println("ERROR - Cannot connect to server!!");
                 quit();
                 localConsole();
@@ -282,14 +367,44 @@ public class ClientMain {
                 //possible that server sends lots of Json at once (i.e. at client startup)
                 String[] strings = message.split("(?<=\\})(?=\\{\"type\")");
                 for(String s: strings){
-                    String serverRespond = processMessageAndRepresent(s,userName);
-//                    System.out.print("\n"+serverRespond);
-                    if(serverRespond.equals(Message.OK)&&request.containsKey(Message.TYPE_QUIT)){
-                        quit();
-                        completed = true;
-                        continue;
+                    if (requests!=null){
+                    Protocol reply = new Protocol(s);
+                    System.out.println("DEBUG - With a request \""+s+"\" examine if it is valid");
+                    if(requests.containsKey(reply.getMessage().getType())){
+                        System.out.println("DEBUG - Request found, criteria fulfilled");
+                        requests.remove(reply.getMessage().getType());
+                        System.out.println("DEBUG - TEMP RESULT: "+s);
                     }
+                    else if(requests.containsKey(requestLookup.get(reply.getMessage().getType()))){
+                        System.out.println("DEBUG - Request found, criteria fulfilled");
+                        requests.remove(requestLookup.get(reply.getMessage().getType()));
+                        System.out.println("DEBUG - TEMP RESULT: "+s);
+                    }
+                    else if(requests.containsKey(Message.TYPE_QUIT)){
+                        if(reply.getMessage().getType().equals(Message.TYPE_ROOM_CHANGE)){
+                            requests.clear();
+                            selector.close();
+                            socketChannel.close();
+                            System.out.println("DEBUG - REQUESTS END, RETURN");
+                            return;
+                        }
+                        else manualCommand(ClientResponds.quit().encodeJson(),socketChannel);
+                    }
+                    if(requests.isEmpty()){
+                        requests.put(Message.TYPE_QUIT,null);
+                    }
+                    System.out.println("DEBUG - REMAINING REQUEST: "+requests);
+                    }
+                    else {
+                        String serverRespond = processMessageAndRepresent(s, userName);
+                        System.out.println(serverRespond);
+                        if (serverRespond.equals(Message.OK) && request.containsKey(Message.TYPE_QUIT)) {
+                            quit();
+                            completed = true;
+                            continue;
+                        }
 //                    System.out.print("\n"+serverRespond);
+                    }
                 }
                 System.out.print("\n"+prefix);// follow-up prefix as command prompt
             } catch (Exception e) {
@@ -324,6 +439,9 @@ public class ClientMain {
                 e.printStackTrace();
             }
         }).start();
+        requestLookup = new HashMap<>();
+        requestLookup.put(Message.TYPE_NEIGHBORS,Message.TYPE_LIST_NEIGHBORS);
+        requestLookup.put(Message.TYPE_ROOM_LIST,Message.TYPE_LIST);
         init();
         localConsole();
     }
@@ -348,6 +466,9 @@ public class ClientMain {
                 return ClientReception.roomContents(p);
             case Message.TYPE_ROOM_LIST: {
                 return ClientReception.roomList(p,request);
+            }
+            case Message.TYPE_NEIGHBORS:{
+                return ClientReception.neighbors(p,request);
             }
             case Message.TYPE_MESSAGE:
                 return ClientReception.message(p,client);

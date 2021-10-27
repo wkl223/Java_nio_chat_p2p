@@ -23,8 +23,8 @@ public class ServerMain {
   protected ThreadPool pool = new ThreadPool(10);
   protected volatile List<Room> chatRoom;
   protected volatile List<String> blackList;
-  protected static ConcurrentHashMap clients; //<key=clientName, value=current room>
-  protected static ConcurrentHashMap client_addresses; //<key=clientName, value=client_listening_address>
+  protected volatile ConcurrentHashMap clients; //<key=clientName, value=current room>
+  protected volatile ConcurrentHashMap client_addresses; //<key=clientName, value=client_listening_address>
   protected static final String DEFAULT_ROOM = "";
   protected Room defaultRoom = new Room(DEFAULT_ROOM,"0",""); //for record purpose only, will be completely transparent.
   SelectionKey selectionKey;
@@ -128,14 +128,15 @@ public class ServerMain {
         try {
           SocketChannel socketChannel = ((ServerSocketChannel) selectionKey.channel()).accept();
           String clientIp = ((ServerSocketChannel) selectionKey.channel()).socket().getInetAddress().getHostAddress();
-
+          System.out.println("DEBUG - Received connect from client: "+clientIp);
           if (socketChannel != null) {
             //set unblocking mode
             socketChannel.configureBlocking(false);
             // register the client to the selector for event monitoring.
             String clientName = socketChannel.getRemoteAddress().toString().replace("/","");
             SelectionKey clientKey = socketChannel.register(selector, SelectionKey.OP_READ, clientName);
-            System.out.println("DEBUG - Received connect from client: "+clientIp);
+            // as there is no proper IP-blocking method in nio.
+            // Connect it, then close connection.
             if(blackList.contains(clientIp)) {
               System.out.println("DEBUG - In blacklist, connection abort");
               clientKey.cancel();
@@ -252,7 +253,7 @@ public class ServerMain {
         } catch (InterruptedException e) {
           this.interrupted();
         }
-        System.out.println(this.getName() + " has been awakened");
+//        System.out.println(this.getName() + " has been awakened");
         try {
           processMessageAndRespond(message, client, selector,selectionKey);
         } catch (IOException e) {
@@ -351,6 +352,11 @@ public class ServerMain {
         }
         case Message.TYPE_LIST: {
           answer = ServerReception.list(p, client, tempRoom);
+          singleResponse(answer,client,selector);
+          break;
+        }
+        case Message.TYPE_LIST_NEIGHBORS:{
+          answer = ServerReception.listNeighbors(client,client_addresses);
           singleResponse(answer,client,selector);
           break;
         }

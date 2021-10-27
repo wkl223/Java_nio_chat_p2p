@@ -6,9 +6,8 @@ import Protocol.*;
 import java.io.IOException;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+
 /*
  * When server received a client's message, it will then process it and respond accordingly.
  * Since the server does not have any command that's send to the client by itself.
@@ -95,41 +94,55 @@ public class ServerReception {
 
     public static Protocol kick(String userName, List<Room> chatRoom, Map<String,String>clients, Map<String,String> clients_addr, List<String> blackList, Selector selector) throws IOException {
         // simply remove the user in all, and add to blacklist
-        String targetIp = userName.split(":")[0];
-        System.out.println("Kicking from room");
-        for (Room r:chatRoom){
-            r.removeUser(targetIp);
-        }
-        System.out.println("Kicking from client list");
-        for (var entry: clients.entrySet()){
-            if(entry.getKey().contains(targetIp)){
-                clients.remove(entry.getKey());
+        if(clients.get(userName)!=null) {
+            String targetIp = userName.split(":")[0];
+            System.out.println("Kicking "+userName+" from room");
+            for (Room r : chatRoom) {
+                r.removeUser(userName);
             }
-        }
-        System.out.println("Kicking from client addresses list");
-        for (var entry: clients_addr.entrySet()){
-            if(entry.getKey().contains(targetIp)){
-                clients_addr.remove(entry.getKey());
-            }
-        }
-        System.out.println("Deregister the keys");
-        for(SelectionKey k: selector.keys()){
-            String clientIp = (String)k.attachment();
-            // The selection key of server itself has no attachment.
-            if(clientIp!= null) {
-                if (clientIp.contains(targetIp)) {
-                    k.cancel();
-                    k.channel().close();
-                    selector.wakeup();
-                    System.out.println("DEBUG - kicked client: " + clientIp);
+            System.out.println("Kicking "+userName+" from client list");
+            for (var entry : clients.entrySet()) {
+                if (entry.getKey().contains(userName)) {
+                    clients.remove(entry.getKey());
                 }
             }
+            System.out.println("Kicking "+userName+" from client addresses list");
+            for (var entry : clients_addr.entrySet()) {
+                if (entry.getKey().contains(userName)) {
+                    clients_addr.remove(entry.getKey());
+                }
+            }
+            System.out.println("Deregister the keys");
+            for (SelectionKey k : selector.keys()) {
+                String clientIp = (String) k.attachment();
+                // The selection key of server itself has no attachment.
+                if (clientIp != null) {
+                    if (clientIp.equals(userName)) {
+                        k.cancel();
+                        k.channel().close();
+                        selector.wakeup();
+                        System.out.println("DEBUG - kicked client: " + clientIp);
+                    }
+                }
+            }
+            blackList.add(targetIp);
+            Message m = new Message();
+            m.setType(Message.TYPE_KICK);
+            m.setSuccessed(true);
+            System.out.println("DEBUG - delete user completed and block ip:" + targetIp);
+            return new Protocol(m);
         }
-        blackList.add(targetIp);
-        Message m = new Message();
-        m.setType(Message.TYPE_KICK);
-        m.setSuccessed(true);
-        System.out.println("DEBUG - delete user and block ip:"+targetIp);
-        return new Protocol(m);
+        else{
+            Message m = new Message();
+            m.setType(Message.TYPE_KICK);
+            m.setSuccessed(false);
+            return new Protocol(m);
+        }
+    }
+    public static Protocol listNeighbors(String client,Map<String,String> clients_addr) throws IOException {
+        Map<String,String> temp = new HashMap<>(clients_addr);
+        temp.remove(client);
+        Protocol respond = ServerResponds.neighbors(temp);
+        return respond;
     }
 }
